@@ -121,3 +121,83 @@ KF.tot %>%
   ggplot()+ 
   geom_line(aes(Date, Value, colour = Type))
 
+#-------------------------------------------------------------------------
+# AR model with local linear trend
+#-------------------------------------------------------------------------
+
+# tot  = FF0t +vt
+# 0t = GG0t-1 +wt
+
+# FF = [1,0]
+# GG = [1,1  , 0t = [a,b]' # trend 2x2.x.1
+#      0,1]
+# Wt = [0,0
+#       0,1]  # state variance comes from trend
+
+# Construct DLM (need to set out above like this!)
+
+mod3 <- dlm(
+  
+  FF =  matrix(c(1,0,1,0), ncol = 4, byrow = TRUE), 
+  
+  V =  matrix(0), 
+  
+  GG = matrix(c(1,1,0,0,
+                0,1,0,0,
+                0,0,0,1,
+                0,0,0,0), ncol = 4, byrow = TRUE) , 
+  
+  W = matrix(c(0,0,0,0,
+               0,0,0,0,
+               0,0,0,0,
+               0,0,0,0), ncol = 4, byrow = TRUE),
+  
+  m0 =  c(0,0,0,0), 
+  
+  C0 =  matrix(c(1e+07,0,0,0,
+                 0,1e+07,0,0,
+                 0,0,1e+07,0,
+                 0,0,0,1e+07), ncol =4,  byrow = TRUE) 
+  
+) 
+
+# Est params
+
+buildFun <- function(params){
+  
+  V(mod3) <- exp(params[1])
+  
+  GG(mod3)[3,3] <- params[2]
+  
+  GG(mod3)[4,3] <- params[3]
+  
+  W(mod3)[2,2] <- exp(params[4])
+  
+  W(mod3)[3,3] <- exp(params[5])
+  
+  return(mod3)
+  
+}
+
+mod3.est <-  dlmMLE(log(GDP$value), parm = c(0,0,0,0,0), build = buildFun)
+
+dlmTotAR2 <- buildFun(mod3.est$par)
+
+#-------------------------------------------------------------------------
+# AR1 Local level 
+#-------------------------------------------------------------------------
+
+KF.tot <- data.frame(
+  Data <- log(GDP$value),
+  Filtered.level = dlmFilter(log(GDP$value), dlmTotAR2)$f,
+  Smoothed.level = dlmSmooth(log(GDP$value), dlmTotAR2)$s[-1,1]+dlmSmooth(log(GDP$value), dlmTotAR2)$s[-1,3]
+)
+
+
+KF.tot %>% 
+  mutate(Date = GDP$date) %>% 
+  gather(Type, Value, - Date) %>% 
+  filter(Date >= '1960-06-01') %>% 
+  ggplot()+ 
+  geom_line(aes(Date, Value, colour = Type))
+
