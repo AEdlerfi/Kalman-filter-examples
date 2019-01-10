@@ -122,17 +122,9 @@ KF.tot %>%
   geom_line(aes(Date, Value, colour = Type))
 
 #-------------------------------------------------------------------------
-# AR model with local linear trend
+# AR model with local linear trend GDP 
 #-------------------------------------------------------------------------
 
-# tot  = FF0t +vt
-# 0t = GG0t-1 +wt
-
-# FF = [1,0]
-# GG = [1,1  , 0t = [a,b]' # trend 2x2.x.1
-#      0,1]
-# Wt = [0,0
-#       0,1]  # state variance comes from trend
 
 # Construct DLM (need to set out above like this!)
 
@@ -145,7 +137,7 @@ mod3 <- dlm(
   GG = matrix(c(1,1,0,0,
                 0,1,0,0,
                 0,0,0,1,
-                0,0,0,0), ncol = 4, byrow = TRUE) , 
+                0,0,0,0), ncol = 4, byrow = TRUE) , # W[3,3] and W[4,3] AR parameters to be estimated 
   
   W = matrix(c(0,0,0,0,
                0,0,0,0,
@@ -161,43 +153,70 @@ mod3 <- dlm(
   
 ) 
 
+# Set priors for level and slope
+
+Level <- log(GDP$value[1])
+Slope <- mean(diff(log(GDP$value)))
+
 # Est params
 
 buildFun <- function(params){
   
-  V(mod3) <- exp(params[1])
+  V(mod3) <- 1e-7
   
-  GG(mod3)[3,3] <- params[2]
+  GG(mod3)[3,3] <- ARtransPars(params[4])
   
-  GG(mod3)[4,3] <- params[3]
+  GG(mod3)[4,3] <- ARtransPars(params[5])
   
-  W(mod3)[2,2] <- exp(params[4])
+  W(mod3)[1,1] <- exp(params[1])
   
-  W(mod3)[3,3] <- exp(params[5])
+  W(mod3)[2,2] <- exp(params[2])
+  
+  W(mod3)[3,3] <- exp(params[3])
+  
+  m0(mod3)[1:2] <- c(Level,Slope)
+  
+  C0(mod3)[1,1] <- 2
+  
+  C0(mod3)[2,2] <- 2
   
   return(mod3)
   
 }
 
-mod3.est <-  dlmMLE(log(GDP$value), parm = c(0,0,0,0,0), build = buildFun)
+mod3.est <-  dlmMLE(log(GDP$value), parm = c(-2.75,-1,-3,0.4,0.4), build = buildFun)
 
-dlmTotAR2 <- buildFun(mod3.est$par)
+dlmGDPgap <- buildFun(mod3.est$par)
 
 #-------------------------------------------------------------------------
 # AR1 Local level 
 #-------------------------------------------------------------------------
 
-KF.tot <- data.frame(
-  Data <- log(GDP$value),
-  Filtered.level = dlmFilter(log(GDP$value), dlmTotAR2)$f,
-  Smoothed.level = dlmSmooth(log(GDP$value), dlmTotAR2)$s[-1,1]+dlmSmooth(log(GDP$value), dlmTotAR2)$s[-1,3]
+Pot.out <- data.frame(
+  log.GDP =log(GDP$value),
+  
+  Potential.Output = dlmSmooth(log(GDP$value), dlmGDPgap)$s[-1,1], # 1 element of the state vector : Pot(t) = Pot(t-1)+trend 
+  
+  Output.gap = dlmSmooth(log(GDP$value), dlmGDPgap)$s[-1,3] # 3 element of the state vector : gap(t) = AR1*gap(t-1)+ AR2*gap(t-2)
+  
 )
 
 
-KF.tot %>% 
+Pot.out %>% 
   mutate(Date = GDP$date) %>% 
   gather(Type, Value, - Date) %>% 
-  filter(Date >= '1960-06-01') %>% 
+  filter(Date >= '1960-06-01' & Type != "Output.gap") %>% 
   ggplot()+ 
-  geom_line(aes(Date, Value, colour = Type))
+  geom_line(aes(Date, Value, colour = Type))+
+  theme_bw()
+  
+
+Pot.out %>% 
+  mutate(Date = GDP$date) %>% 
+  gather(Type, Value, - Date) %>% 
+  filter(Date >= '1960-06-01' & Type == "Output.gap") %>% 
+  ggplot()+ 
+  geom_hline(yintercept = 0)+
+  geom_line(aes(Date, Value, colour = Type))+
+  theme_bw()
 
